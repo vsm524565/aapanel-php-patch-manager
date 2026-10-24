@@ -1,0 +1,11 @@
+{
+  "servers": {
+    "dssaubuntu24": {
+      "host": "192.168.56.110",
+      "port": 2202,
+      "user": "dssa-test",
+      "identity_file": "~/.ssh/devops_lab_ed25519",
+      "environment": "test"
+    }
+  }
+}

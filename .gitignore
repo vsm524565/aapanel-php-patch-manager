@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+*.pyc
+inventory.local.json
+reports/*
+!reports/.gitkeep
