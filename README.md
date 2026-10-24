@@ -1,75 +1,255 @@
 # aaPanel PHP Patch Manager
 
-Temporary operations project: run locally on Ubuntu, discover and eventually patch remote aaPanel Ubuntu hosts over SSH. Python orchestrates a Bash backend. Standard library only; Python 3.10+ and OpenSSH required locally, Python 3 and Bash required remotely.
+PHP inventory and security patch management for aaPanel servers, developed as an Adversity Solutions infrastructure project.
 
-## Current milestone: read-only inventory
+The application runs on a local Ubuntu machine and connects to remote servers over SSH. Python handles orchestration and reporting; Bash provides the remote discovery entry point.
 
-Implemented: explicit single-host selection, strict SSH host-key validation, key/agent authentication, noninteractive sudo, bounded remote commands, JSON evidence, private report permissions and local tests. The collector runs no installer and writes no remote project files. Normal SSH/sudo activity can generate system logs.
+## Current status
 
-Not implemented yet: patch selection, resolved website mappings, backups, updates, service restarts, HTTP runtime probes, rollback or production rollout. Do not treat the inventory as proof that a server is patched. No fixed-version security policy is embedded yet; validate vendor releases and backports before implementing it.
+**Implemented and verified on the test VM:**
+
+- Explicit single-server selection.
+- SSH key authentication with strict host-key checking.
+- A dedicated `as-automation` account.
+- Restricted passwordless sudo for the discovery command.
+- Root-owned remote discovery scripts.
+- Detection of aaPanel presence and version.
+- Discovery of PHP binaries, extensions and configuration paths.
+- Collection of running webserver/PHP processes and handler references.
+- Local JSON reports with file permissions `600`.
+- Six passing local unit tests.
+- Successful remote discovery and denial of arbitrary root Bash execution.
+
+**Not implemented yet:**
+
+- Automated account and collector bootstrap.
+- Resolved website-to-PHP runtime mappings.
+- Patch selection and update planning.
+- Backup and recovery integration.
+- PHP updates and worker restarts.
+- HTTP runtime and application health verification.
+- Production rollout.
+
+Discovery does not establish that a server is patched or that its websites are healthy.
+
+## Architecture
+
+Local Python application → SSH → automation account → restricted sudo command → remote collector → JSON report.
+
+| Component | Responsibility |
+|---|---|
+| `patch_manager.py` | Validate inventory, invoke SSH and save reports |
+| `backend/discover.sh` | Collect remote PHP, panel and process evidence |
+| `inventory.example.json` | Provide a sample target configuration |
+| `inventory.local.json` | Store actual connection details; excluded from Git |
+| `reports/` | Store local discovery reports; contents excluded from Git |
+| `tests/test_manager.py` | Check inventory validation, SSH behaviour and report permissions |
+
+The remote administrator installs two root-owned files:
+
+- `/usr/local/lib/adversity/php-discover`: fixed entry point.
+- `/usr/local/lib/adversity/php-discover.sh`: discovery collector.
+
+The entry point rejects arguments, changes its working directory to `/`, and invokes the collector with a clean environment. The collector uses isolated Python execution.
+
+The application invokes the installed collector. It does not stream executable code into a privileged remote shell.
+
+## Requirements
+
+### Local machine
+
+- Python 3.10 or later.
+- OpenSSH client.
+- Access to the target server.
+- A verified SSH host key.
+- An SSH private key, loaded into an SSH agent if passphrase protected.
+
+### Remote server
+
+- Ubuntu with Bash and Python 3.
+- SSH public-key authentication.
+- The installed root-owned discovery entry point and collector.
+- A sudo rule permitting the automation account to execute only the discovery entry point without arguments.
+
+No third-party Python packages are required.
 
 ## Local setup
 
-Extract this directory into ~/projects, then:
+Clone the repository:
 
 ```bash
-cd ~/projects/aapanel-php-patch-manager
+git clone git@github.com:vsm524565/aapanel-php-patch-manager.git
+cd aapanel-php-patch-manager
+```
+
+Create and activate a virtual environment:
+
+```bash
 python3 -m venv .venv
 source .venv/bin/activate
+```
+
+Create the local inventory:
+
+```bash
 cp inventory.example.json inventory.local.json
 chmod 600 inventory.local.json
-python3 -m unittest discover -s tests -v
 ```
 
-No pip dependencies are needed. If venv support is missing, install Ubuntu's python3-venv package first. Keep passwords and private keys out of this project.
+Edit `inventory.local.json` with the actual server address, SSH port, username and private-key path.
 
-## Verify SSH before discovery
+Example structure:
+
+```json
+{
+  "servers": {
+    "test-server": {
+      "host": "192.0.2.10",
+      "port": 2202,
+      "user": "as-automation",
+      "identity_file": "~/.ssh/example_ed25519",
+      "environment": "test"
+    }
+  }
+}
+```
+
+The address and key path above are placeholders. Supported environment labels are `test` and `production`; the label records context and does not itself enforce deployment restrictions.
+
+## Remote access setup
+
+An administrator must provision the automation account, install its SSH public key, and deploy the root-owned discovery files before inventory can run.
+
+The automation account does not require membership in the `sudo` group.
+
+Its discovery permission is:
+
+```sudoers
+as-automation ALL=(root) NOPASSWD: /usr/local/lib/adversity/php-discover ""
+```
+
+The trailing `""` restricts the command to execution without arguments.
+
+Validate the rule with `visudo` before using it. The entry point, collector and their parent directories must not be writable by the automation account.
+
+Automated provisioning is planned. The current repository is not a complete bootstrap installer.
+
+## Verify SSH access
+
+From the local machine, using actual connection details:
 
 ```bash
-ssh -i ~/.ssh/devops_lab_ed25519 -p 2202 dssa-test@192.168.56.110
+ssh -i ~/.ssh/example_ed25519 \
+    -o IdentitiesOnly=yes \
+    -o BatchMode=yes \
+    -o StrictHostKeyChecking=yes \
+    -p 2202 \
+    as-automation@192.0.2.10 \
+    'hostname; id'
 ```
 
-Verify any new host fingerprint against the VM console before accepting it. If reinstalling the VM changes its key, verify the replacement at the console before updating known_hosts. The application never disables host-key checks.
+Verify a new host fingerprint against the server console before trusting it. If a server is rebuilt, verify its replacement host key before updating `known_hosts`.
 
-On the VM, verify the existing sudo policy:
+The application does not disable host-key validation.
+
+## Run discovery
+
+Select the target by its inventory name:
 
 ```bash
-sudo -n true
+python3 patch_manager.py inventory --server test-server
 ```
 
-Inventory requires root read access. The non-root automation user needs an existing passwordless sudo policy permitting `sudo -n bash -s`; `sudo -n true` is only an initial check, not proof of that permission. Do not grant unrestricted production sudo merely to satisfy this scaffold. If sudo is password protected or policy blocks the collector, stop and choose the production authentication/privilege approach explicitly. Root SSH is also supported by setting user to root; authentication is key/agent only in this milestone.
-
-Run from your laptop:
+For the existing local lab inventory:
 
 ```bash
 python3 patch_manager.py inventory --server dssaubuntu24
 ```
 
-The example uses the last recorded VM endpoint 192.168.56.110:2202. Confirm the VM still uses it. A bare VM should report no aaPanel and no PHP; this is valid baseline discovery. After installing aaPanel and the test stack, repeat discovery and compare reports.
+The application executes:
 
-Exit codes: 0 = discovery finished without recorded collection errors; 1 = configuration/SSH/transport/report failure; 2 = report saved with incomplete discovery. Zero does not mean security compliance or website health. Inspect the JSON limitations. Reports include topology, process arguments and handler configuration lines: review before sharing. Reports and the local inventory are excluded from Git.
+```bash
+sudo -n /usr/local/lib/adversity/php-discover
+```
 
-## Test sequence
+It does not request permission to run arbitrary Bash commands as root.
 
-1. Local unit tests (no SSH or remote changes).
-2. Bare dssaubuntu24 discovery: confirm OS, privileges and absence of panel.
-3. Install aaPanel manually on the VM; match production webserver/PHP branches.
-4. Configure a disposable PHP/database website and snapshot the VM.
-5. Repeat inventory, including multiple PHP branches and an unused branch.
-6. Confirm wrong host key, unreachable SSH and denied sudo stop cleanly.
-7. Build vendor-specific update path from the discovered installation method.
-8. Test same-branch update, extension/config preservation, worker replacement and HTTP runtime checks.
-9. Test failed update/health check and recovery on the VM.
-10. Roll out to one explicitly selected production server, verify, then continue serially.
+`sudo -n true` may be denied even when discovery is correctly authorized. Test the permitted discovery command to verify its specific sudo rule.
 
-Never install an untrusted vulnerable build just to exercise an upgrade. An already current server must eventually produce a no-op update plan. Production work requires an available recovery backup and a reviewed target plan. The updater must stop on failed verification; configuration copies alone cannot roll back PHP binaries or extension ABI changes.
+## Discovery report
 
-## Planned structure
+Reports are written to `reports/` with timestamps and file permissions `600`.
 
-- patch_manager.py: local SSH orchestration and report storage
-- backend/discover.sh: remote read-only evidence collector
-- inventory.example.json: test target template
-- tests/test_manager.py: validation, SSH failure and report privacy checks
-- reports/: ignored local evidence
+They contain:
 
-Keep this project separate from DSSA. When initializing Git use user.name vsm524565 and user.email vsm524565@gmail.com. No repository has been created or pushed by this scaffold.
+- Target name, address and environment.
+- Remote hostname, operating system and effective user ID.
+- aaPanel presence, version and version evidence source.
+- Detected PHP binaries and versions.
+- PHP configuration paths and loaded extensions.
+- Running webserver and PHP processes.
+- Handler configuration references.
+- Disk and memory information.
+- Collection errors and limitations.
+
+Reports can contain infrastructure details, process arguments and configuration excerpts. Review them before sharing.
+
+### Interpretation limits
+
+- A configuration reference does not prove that a PHP branch is installed or active.
+- A CLI binary version does not prove which version serves HTTP requests.
+- Installed webservers may not be running or serving websites.
+- An unknown aaPanel version is different from an absent panel.
+- An empty error list indicates no recorded collection failures; it does not prove complete runtime coverage.
+
+## Exit codes
+
+| Code | Meaning |
+|---|---|
+| `0` | Discovery completed without recorded collection errors |
+| `1` | Inventory, SSH, execution or report-processing failure |
+| `2` | Report saved with collection errors |
+
+Exit code `0` does not indicate security compliance.
+
+## Validation
+
+Run the existing local tests:
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+
+Check the Bash entry script syntax:
+
+```bash
+bash -n backend/discover.sh
+```
+
+Local tests cover input validation, required SSH options, root/non-root command selection, SSH failure handling, incomplete report rejection and report permissions.
+
+Remote smoke checks have confirmed that the permitted collector runs as root and an arbitrary root Bash command is denied.
+
+Update and application health tests remain pending implementation.
+
+## Planned update workflow
+
+1. Discover installed runtimes and website handler mappings.
+2. Generate and display a same-branch patch plan.
+3. Confirm recovery readiness and require explicit `APPLY`.
+4. Execute the reviewed plan on the test server.
+5. Verify configuration, extensions, worker replacement and website behaviour.
+6. Resolve failures before proceeding to production.
+7. Update one production server at a time and record results.
+
+Already current installations should produce a no-op plan. Failed update or health verification must stop further rollout.
+
+PHP branches must not be migrated automatically. Vendor release and backport evidence must be verified before marking a runtime patched.
+
+## Project workflow
+
+Requirements → Architecture → Implementation → Testing → Break/fix → Documentation → GitHub → Portfolio.
+
+Changes are implemented manually with focused review. Lightweight syntax and smoke checks support implementation; consolidated testing follows the completed functionality.
+
+This project is separate from the Developer Server Setup Assistant and InfraGuard.
