@@ -330,7 +330,7 @@ parse_arguments() {
 
     while (($#)); do
         case "$1" in
-            --plan|--apply)
+            --plan|--apply|--status)
                 ((mode_seen == 0)) ||
                     fail "Specify only one mode."
                 MODE="${1#--}"
@@ -361,7 +361,7 @@ parse_arguments() {
                 shift 2
                 ;;
             -h|--help)
-                printf 'Usage: %s [--plan|--apply|--watch ID] [--all|--branch X.Y] [--timeout SECONDS]\n' "$0"
+                printf 'Usage: %s [--plan|--status|--apply|--watch ID] [--all|--branch X.Y] [--timeout SECONDS]\n' "$0"
                 exit 0
                 ;;
             *)
@@ -798,18 +798,95 @@ apply_all_branches() (
     printf 'Submission confirms queue acceptance, not update success.\n'
 
     return "$failures"
-
-    printf '\nBranch results:\n'
-    cat "$summary"
-    printf '\nTask manifest: %s\nResults: %s\n' "$manifest" "$summary"
 )
 
+# Check installed branches once without submitting or monitoring updates.
+# CURRENT means binary versions match the catalogue, not website health.
+status_php_branches() (
+    preflight
+    acquire_lock
 
+    local work_dir branch installed candidate task result
+    local count=0 exit_status=0
+    local current=0 pending=0 available=0 blocked=0
+
+    work_dir="$(mktemp -d)" ||
+        fail "Cannot create temporary directory."
+    trap 'rm -rf -- "$work_dir"' EXIT
+
+    printf '\nMode: status; no updates will be submitted.\n'
+
+    fetch_php_catalogue "$work_dir/catalogue.tsv" ||
+        fail "Catalogue retrieval failed."
+
+    while IFS=$'\t' read -r branch installed candidate task; do
+        if [[ -n "$SELECTED_BRANCH" &&
+              "$branch" != "$SELECTED_BRANCH" ]]; then
+            continue
+        fi
+
+        [[ "$installed" == "yes" ]] || continue
+        count=$((count + 1))
+
+        printf '\nPHP %s | Candidate: %s | Task flag: %s\n' \
+            "$branch" "$candidate" "$task"
+
+        # Inspect binaries independently so a task flag cannot mask errors.
+        inspect_php_branch "$branch" "$candidate" "1"
+
+        if [[ "$BRANCH_ACTION" == "BLOCKED" ]]; then
+            result="BLOCKED"
+            blocked=$((blocked + 1))
+            exit_status=1
+        else
+            case "$task" in
+                -2|-1|0)
+                    result="PENDING"
+                    pending=$((pending + 1))
+                    printf 'Panel reports an unfinished task; progress is not verified.\n'
+                    ((exit_status != 0)) || exit_status=2
+                    ;;
+                1)
+                    if [[ "$BRANCH_ACTION" == "SKIP" ]]; then
+                        result="CURRENT"
+                        current=$((current + 1))
+                    else
+                        result="UPDATE-AVAILABLE"
+                        available=$((available + 1))
+                        ((exit_status != 0)) || exit_status=2
+                    fi
+                    ;;
+                *)
+                    result="BLOCKED"
+                    blocked=$((blocked + 1))
+                    exit_status=1
+                    printf 'Unrecognized task flag: %s\n' "$task"
+                    ;;
+            esac
+        fi
+
+        printf 'Status: %s\n' "$result"
+    done < "$work_dir/catalogue.tsv"
+
+    ((count > 0)) ||
+        fail "No matching installed PHP branches reported by aaPanel."
+
+    printf '\nSummary: current=%s pending=%s update-available=%s blocked=%s\n' \
+        "$current" "$pending" "$available" "$blocked"
+
+    printf 'Status check complete. No tasks submitted or services restarted.\n'
+    printf 'Module loading, FPM configuration and website health were not checked.\n'
+
+    return "$exit_status"
+)
 # Preserve single-branch/watch modes and add explicit bulk application.
+# Route to preview, status, submission or task monitoring.
 main() {
     parse_arguments "$@"
 
-    if [[ "$MODE" == "apply" && "$ALL_BRANCHES" == 1 ]]; then
+    if [[ "$MODE" == "status" ]]; then
+        status_php_branches
+    elif [[ "$MODE" == "apply" && "$ALL_BRANCHES" == 1 ]]; then
         apply_all_branches
     else
         main_single "$@"
