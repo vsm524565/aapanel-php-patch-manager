@@ -1,4 +1,4 @@
-# PHP Patch Manager
+# PHP Patch Updater
 
 Server-local PHP patch maintenance using a Python launcher and Bash backends.
 
@@ -37,10 +37,10 @@ The launcher uses Python's standard library.
 
 ## Download and run
 
-Version 1.0.0:
+Version 1.0.1:
 
 ```bash
-curl -fL https://raw.githubusercontent.com/vsm524565/aapanel-php-patch-manager/v1.0.0/local_patch_manager.py -o patch-manager.py
+curl -fL https://raw.githubusercontent.com/vsm524565/php-patch-updater/v1.0.1/local_patch_manager.py -o patch-manager.py
 ```
 
 Plan:

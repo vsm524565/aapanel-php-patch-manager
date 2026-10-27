@@ -12,7 +12,7 @@ import tempfile
 import urllib.request
 
 
-REPOSITORY = "vsm524565/aapanel-php-patch-manager"
+REPOSITORY = "vsm524565/php-patch-updater"
 
 # Filled locally from the committed, tested backend checkpoint.
 BACKEND_REVISION = '4939dc3958a6790124037bd2658545e45f18f069'

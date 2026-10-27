@@ -1,4 +1,4 @@
-# PHP Patch Manager Architecture
+# PHP Patch Updater Architecture
 
 ## Execution model
 
