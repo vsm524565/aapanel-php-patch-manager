@@ -37,10 +37,10 @@ The launcher uses Python's standard library.
 
 ## Download and run
 
-Current development version:
+Version 1.0.0:
 
 ```bash
-curl -fL https://raw.githubusercontent.com/vsm524565/aapanel-php-patch-manager/feature/local-patch-launcher/local_patch_manager.py -o patch-manager.py
+curl -fL https://raw.githubusercontent.com/vsm524565/aapanel-php-patch-manager/v1.0.0/local_patch_manager.py -o patch-manager.py
 ```
 
 Plan:
