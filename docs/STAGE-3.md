@@ -40,3 +40,29 @@ Run launcher planning checks on:
 
 Verify aaPanel launcher routing separately.
 No repeat downgrade/upgrade tests are planned.
+## Launcher integration results — 2026-10-27
+
+Planning completed with backend and launcher exit status 0 for:
+
+| Environment | Selected route |
+|---|---|
+| Debian 13, no panel | Conventional → APT |
+| Ubuntu 22, CyberPanel | CyberPanel |
+| Ubuntu 26, Hestia | Conventional → APT |
+| Ubuntu 24, cPanel | cPanel → APT |
+| AlmaLinux 10, cPanel | cPanel → DNF |
+| Rocky 10, no panel | Conventional → DNF |
+| Ubuntu, aaPanel — existing live server | aaPanel → plan all branches |
+
+Temporary backend cleanup was reported for every route.
+No updates were applied during these launcher planning checks.
+The previous resume checklist is now complete.
+
+Existing limitations observed:
+- CyberPanel: missing PHP 7.4 executable and PHP 8.1 timezonedb warning.
+- aaPanel: PHP 8.1 catalogue/runtime mismatch for LSPHP remains unresolved.
+- aaPanel's catalogue client emits an unverified HTTPS warning.
+- Backend logging through tee can cause final messages to appear out of order.
+
+These tests validate launcher planning integration.
+Actual backend upgrade evidence remains recorded in STAGE-2.md.
