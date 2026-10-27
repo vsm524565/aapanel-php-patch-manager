@@ -1,255 +1,162 @@
-# aaPanel PHP Patch Manager
+# PHP Patch Manager
 
-PHP inventory and security patch management for aaPanel servers, developed as an Adversity Solutions infrastructure project.
+Server-local PHP patch maintenance using a Python launcher and Bash backends.
 
-The application runs on a local Ubuntu machine and connects to remote servers over SSH. Python handles orchestration and reporting; Bash provides the remote discovery entry point.
+Python checks root access, detects the control panel, retrieves verified
+backend scripts and executes them. Bash handles environment validation,
+package-manager selection, PHP discovery and patch operations.
 
-## Current status
+## Scope
 
-**Implemented and verified on the test VM:**
+Maintain existing PHP installations within the supported environments.
+This project does not deploy applications or perform PHP branch migrations.
 
-- Explicit single-server selection.
-- SSH key authentication with strict host-key checking.
-- A dedicated `as-automation` account.
-- Restricted passwordless sudo for the discovery command.
-- Root-owned remote discovery scripts.
-- Detection of aaPanel presence and version.
-- Discovery of PHP binaries, extensions and configuration paths.
-- Collection of running webserver/PHP processes and handler references.
-- Local JSON reports with file permissions `600`.
-- Six passing local unit tests.
-- Successful remote discovery and denial of arbitrary root Bash execution.
-
-**Not implemented yet:**
-
-- Automated account and collector bootstrap.
-- Resolved website-to-PHP runtime mappings.
-- Patch selection and update planning.
-- Backup and recovery integration.
-- PHP updates and worker restarts.
-- HTTP runtime and application health verification.
-- Production rollout.
-
-Discovery does not establish that a server is patched or that its websites are healthy.
-
-## Architecture
-
-Local Python application → SSH → automation account → restricted sudo command → remote collector → JSON report.
-
-| Component | Responsibility |
+| Validated environment | Backend |
 |---|---|
-| `patch_manager.py` | Validate inventory, invoke SSH and save reports |
-| `backend/discover.sh` | Collect remote PHP, panel and process evidence |
-| `inventory.example.json` | Provide a sample target configuration |
-| `inventory.local.json` | Store actual connection details; excluded from Git |
-| `reports/` | Store local discovery reports; contents excluded from Git |
-| `tests/test_manager.py` | Check inventory validation, SSH behaviour and report permissions |
+| Ubuntu + aaPanel | aapanel_php_update.sh |
+| Ubuntu 22 + CyberPanel | cyberpanel_php_update.sh |
+| Ubuntu 26 + Hestia | ubuntu_php_update.sh |
+| Debian 13 conventional PHP | ubuntu_php_update.sh |
+| Ubuntu 24 + cPanel | cpanel_php_update.sh — APT |
+| AlmaLinux 10 + cPanel | cpanel_php_update.sh — DNF |
+| Rocky 10 conventional PHP | dnf_php_update.sh |
 
-The remote administrator installs two root-owned files:
-
-- `/usr/local/lib/adversity/php-discover`: fixed entry point.
-- `/usr/local/lib/adversity/php-discover.sh`: discovery collector.
-
-The entry point rejects arguments, changes its working directory to `/`, and invokes the collector with a clean environment. The collector uses isolated Python execution.
-
-The application invokes the installed collector. It does not stream executable code into a privileged remote shell.
+This table records tested environments, not universal compatibility.
 
 ## Requirements
 
-### Local machine
+- Root access on the target server.
+- Python 3 and Bash.
+- CA certificates and outbound HTTPS access to GitHub.
+- curl for the download command below.
+- Correct system time.
+- Backend-specific commands and configured package repositories.
+- For aaPanel: its existing panel Python environment and App Store backend.
 
-- Python 3.10 or later.
-- OpenSSH client.
-- Access to the target server.
-- A verified SSH host key.
-- An SSH private key, loaded into an SSH agent if passphrase protected.
+The launcher uses Python's standard library.
 
-### Remote server
+## Download and run
 
-- Ubuntu with Bash and Python 3.
-- SSH public-key authentication.
-- The installed root-owned discovery entry point and collector.
-- A sudo rule permitting the automation account to execute only the discovery entry point without arguments.
-
-No third-party Python packages are required.
-
-## Local setup
-
-Clone the repository:
+Current development version:
 
 ```bash
-git clone git@github.com:vsm524565/aapanel-php-patch-manager.git
-cd aapanel-php-patch-manager
+curl -fL https://raw.githubusercontent.com/vsm524565/aapanel-php-patch-manager/feature/local-patch-launcher/local_patch_manager.py -o patch-manager.py
 ```
 
-Create and activate a virtual environment:
+Plan:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
+sudo python3 patch-manager.py --plan
 ```
 
-Create the local inventory:
+Apply:
 
 ```bash
-cp inventory.example.json inventory.local.json
-chmod 600 inventory.local.json
+sudo python3 patch-manager.py --apply
 ```
 
-Edit `inventory.local.json` with the actual server address, SSH port, username and private-key path.
-
-Example structure:
-
-```json
-{
-  "servers": {
-    "test-server": {
-      "host": "192.0.2.10",
-      "port": 2202,
-      "user": "as-automation",
-      "identity_file": "~/.ssh/example_ed25519",
-      "environment": "test"
-    }
-  }
-}
-```
-
-The address and key path above are placeholders. Supported environment labels are `test` and `production`; the label records context and does not itself enforce deployment restrictions.
-
-## Remote access setup
-
-An administrator must provision the automation account, install its SSH public key, and deploy the root-owned discovery files before inventory can run.
-
-The automation account does not require membership in the `sudo` group.
-
-Its discovery permission is:
-
-```sudoers
-as-automation ALL=(root) NOPASSWD: /usr/local/lib/adversity/php-discover ""
-```
-
-The trailing `""` restricts the command to execution without arguments.
-
-Validate the rule with `visudo` before using it. The entry point, collector and their parent directories must not be writable by the automation account.
-
-Automated provisioning is planned. The current repository is not a complete bootstrap installer.
-
-## Verify SSH access
-
-From the local machine, using actual connection details:
+PHP is the default component. It can also be selected explicitly:
 
 ```bash
-ssh -i ~/.ssh/example_ed25519 \
-    -o IdentitiesOnly=yes \
-    -o BatchMode=yes \
-    -o StrictHostKeyChecking=yes \
-    -p 2202 \
-    as-automation@192.0.2.10 \
-    'hostname; id'
+sudo python3 patch-manager.py --component php --plan
 ```
 
-Verify a new host fingerprint against the server console before trusting it. If a server is rebuilt, verify its replacement host key before updating `known_hosts`.
+Apply retains the backend's confirmation prompts. DNF transactions require
+interactive review. This version is intended for supervised operation.
 
-The application does not disable host-key validation.
+Planning can refresh repository metadata or aaPanel catalogue caches.
 
-## Run discovery
+## Execution
 
-Select the target by its inventory name:
+1. Check root privileges.
+2. Detect panel markers and reject conflicting or unsupported panels.
+3. Select the PHP backend group.
+4. Download backends from a pinned Git commit.
+5. Verify their SHA-256 checksums.
+6. Execute Bash with inherited terminal input and output.
+7. Remove temporary backend downloads and return the backend exit status.
 
-```bash
-python3 patch_manager.py inventory --server test-server
-```
+Python does not choose the package manager from OS information.
 
-For the existing local lab inventory:
+For conventional PHP, a Bash dispatcher selects APT or DNF.
+The cPanel backend selects its own APT or DNF route.
+Every backend retains its own supported-environment checks.
 
-```bash
-python3 patch_manager.py inventory --server dssaubuntu24
-```
+aaPanel requests are translated to --plan --all or --apply --all.
+A queued aaPanel update is not proof of completed installation.
 
-The application executes:
+## Downloads and retained data
 
-```bash
-sudo -n /usr/local/lib/adversity/php-discover
-```
+The downloaded Python launcher remains available for reuse.
 
-It does not request permission to run arbitrary Bash commands as root.
+Bash backends are downloaded into a private temporary directory and removed
+after execution, including ordinary errors and terminal interruption.
+Forced termination or power loss can leave temporary files.
 
-`sudo -n true` may be denied even when discovery is correctly authorized. Test the permitted discovery command to verify its specific sudo rule.
+Backend-generated logs, configuration backups and task records remain.
+Configuration backups do not provide complete package or server rollback.
 
-## Discovery report
+Backends are pinned to commit:
+4939dc3958a6790124037bd2658545e45f18f069
 
-Reports are written to `reports/` with timestamps and file permissions `600`.
-
-They contain:
-
-- Target name, address and environment.
-- Remote hostname, operating system and effective user ID.
-- aaPanel presence, version and version evidence source.
-- Detected PHP binaries and versions.
-- PHP configuration paths and loaded extensions.
-- Running webserver and PHP processes.
-- Handler configuration references.
-- Disk and memory information.
-- Collection errors and limitations.
-
-Reports can contain infrastructure details, process arguments and configuration excerpts. Review them before sharing.
-
-### Interpretation limits
-
-- A configuration reference does not prove that a PHP branch is installed or active.
-- A CLI binary version does not prove which version serves HTTP requests.
-- Installed webservers may not be running or serving websites.
-- An unknown aaPanel version is different from an absent panel.
-- An empty error list indicates no recorded collection failures; it does not prove complete runtime coverage.
-
-## Exit codes
-
-| Code | Meaning |
-|---|---|
-| `0` | Discovery completed without recorded collection errors |
-| `1` | Inventory, SSH, execution or report-processing failure |
-| `2` | Report saved with collection errors |
-
-Exit code `0` does not indicate security compliance.
+The development launcher URL can change; backend versions remain pinned
+until the launcher's revision and checksums are deliberately updated.
 
 ## Validation
 
-Run the existing local tests:
+- Launcher planning passed on all seven environments listed above.
+- Launcher already-current apply passed on Debian APT and Rocky DNF.
+- Actual backend upgrades passed on Debian APT, Ubuntu cPanel APT,
+  AlmaLinux cPanel DNF and Rocky conventional DNF.
+- aaPanel backend updates were exercised on existing live servers.
+- Repository refresh failure propagated through the launcher as exit 100.
 
-```bash
-python3 -m unittest discover -s tests -v
-```
+Detailed evidence and limitations:
+- docs/STAGE-1.md
+- docs/STAGE-2.md
+- docs/STAGE-3.md
 
-Check the Bash entry script syntax:
+## Limitations
 
-```bash
-bash -n backend/discover.sh
-```
+- Actual upgrades on the Hestia and CyberPanel test environments remain
+  pending because the checked repositories/cache contained only current versions.
+- cPanel labs had no configured FPM pools; FPM application serving was not tested.
+- CyberPanel had an existing missing PHP 7.4 executable and a PHP 8.1
+  timezonedb warning.
+- aaPanel's PHP 8.1 LSPHP/catalogue mismatch remains unresolved.
+- aaPanel's catalogue client emits an unverified HTTPS warning.
+- Automatic dependency-scope rejection is incomplete in DNF routes;
+  operators must review the final transaction.
+- Application deployment and application-request testing are outside
+  the agreed validation scope.
+- Existing backend checks do not cover every failure or repository layout.
 
-Local tests cover input validation, required SSH options, root/non-root command selection, SSH failure handling, incomplete report rejection and report permissions.
+A successful exit describes the selected backend operation. It does not
+establish website health, complete security compliance or a numerical
+production success probability.
 
-Remote smoke checks have confirmed that the permitted collector runs as root and an arbitrary root Bash command is denied.
+## Exit status
 
-Update and application health tests remain pending implementation.
+The launcher returns the backend exit status.
 
-## Planned update workflow
+- 0: backend completed its requested operation.
+- 1: launcher failure, or a backend-defined failure.
+- 130: launcher interrupted through Ctrl+C.
 
-1. Discover installed runtimes and website handler mappings.
-2. Generate and display a same-branch patch plan.
-3. Confirm recovery readiness and require explicit `APPLY`.
-4. Execute the reviewed plan on the test server.
-5. Verify configuration, extensions, worker replacement and website behaviour.
-6. Resolve failures before proceeding to production.
-7. Update one production server at a time and record results.
+Other backend codes are preserved, including APT failures such as 100.
+Consult backend output because codes can have different meanings by backend.
 
-Already current installations should produce a no-op plan. Failed update or health verification must stop further rollout.
+## Earlier SSH discovery tooling
 
-PHP branches must not be migrated automatically. Vendor release and backport evidence must be verified before marking a runtime patched.
+The repository retains the earlier remote inventory workflow:
 
-## Project workflow
+- patch_manager.py
+- backend/discover.sh
+- inventory.example.json
+- tests/test_manager.py
 
-Requirements → Architecture → Implementation → Testing → Break/fix → Documentation → GitHub → Portfolio.
+It is separate from local_patch_manager.py and is not required for the
+server-local patch workflow. Its tests cover the discovery tool, not the
+new launcher or all maintenance backends.
 
-Changes are implemented manually with focused review. Lightweight syntax and smoke checks support implementation; consolidated testing follows the completed functionality.
-
-This project is separate from the Developer Server Setup Assistant and InfraGuard.
+Original live-used updater baselines are preserved in backend/reference/.

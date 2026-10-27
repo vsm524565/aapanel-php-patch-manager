@@ -66,3 +66,15 @@ Existing limitations observed:
 
 These tests validate launcher planning integration.
 Actual backend upgrade evidence remains recorded in STAGE-2.md.
+## Launcher apply integration — 2026-10-27
+
+Already-current apply completed successfully on:
+- Debian 13 conventional APT.
+- Rocky 10 conventional DNF.
+
+Both returned backend and launcher exit status 0.
+No packages changed, no update confirmation was required, and temporary
+backend cleanup was reported.
+
+Actual upgrade tests were not repeated through the launcher.
+The backend upgrade evidence remains recorded in STAGE-2.md.
